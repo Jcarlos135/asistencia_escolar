@@ -1,0 +1,48 @@
+﻿══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+REPORTE DE ASISTENCIA ESCOLAR - NIVEL SECUNDARIA
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+Institución Educativa:,Colegio Nacional
+Docente Responsable:,Walter Chirinos Aduviri
+Materia / Área:,Matemática
+Curso / Grado:,1ro Secundaria
+Periodo Reportado:,2026-11
+Fecha de Generación:,2026-11-07 18:54:22
+País:,Bolivia (+591)
+
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+RESUMEN GENERAL DEL CURSO
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+Total de Estudiantes:,5
+Total de Registros de Asistencia:,5
+Total Presentes:,5
+Total Ausentes:,0
+Total Permisos:,0
+Total Atrasos:,0
+Promedio General de Asistencia:,100.0%
+Alumnos en Riesgo (≥3 faltas o <80%):,0
+
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+DETALLE POR ESTUDIANTE
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+N°,CI Estudiante,Estudiante,Tutor / Apoderado,CI Tutor,Teléfono (Bolivia),Días Reg.,Presentes,Ausentes,Permisos,Atrasos,% Asistencia,Estado,Observación
+1,56789012,Joaquín Fernández,Elena Fernández,43210987,77778888,1,1,0,0,0,100.0%,REGULAR,
+2,34567890,Lucas Rodríguez,Patricia Rodríguez,65432109,73334444,1,1,0,0,0,100.0%,REGULAR,
+3,12345678,Mateo González,Carlos González,87654321,71234567,1,1,0,0,0,100.0%,REGULAR,
+4,23456789,Sofía Martínez,Laura Martínez,76543210,78765432,1,1,0,0,0,100.0%,REGULAR,
+5,45678901,Valentina Pérez,Roberto Pérez,54321098,75556666,1,1,0,0,0,100.0%,REGULAR,
+
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+LEYENDA DE ESTADOS:
+  PRESENTE = Alumno asistió a clases
+  AUSENTE  = Falta sin justificación
+  PERMISO  = Falta justificada (documento o aviso previo)
+  ATRASO   = Llegada tarde (cuenta como asistencia parcial)
+  EN RIESGO = ≥3 faltas o asistencia <80% en el periodo
+
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+Documento generado automáticamente por Sistema de Asistencia Escolar - Bolivia
+Última actualización: 2026-11-07 18:54:22
+══════════════════════════════════════════════════════════════════════════════════════════════════════════════

@@ -28,7 +28,9 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
         nivel TEXT,
-        seccion TEXT
+        seccion TEXT,
+        activo INTEGER DEFAULT 1,
+        actualizado_en TEXT DEFAULT ''
     )
     """)
 
@@ -42,10 +44,11 @@ def init_db():
         tutor_nombre TEXT NOT NULL,
         tutor_ci TEXT DEFAULT '',
         tutor_telefono TEXT NOT NULL,
+        activo INTEGER DEFAULT 1,
+        actualizado_en TEXT DEFAULT '',
         FOREIGN KEY (curso_id) REFERENCES cursos (id) ON DELETE CASCADE
     )
     """)
-    # Migración: agregar columnas nuevas si la BD ya existía
     _agregar_columna_si_no_existe(cursor, "estudiantes", "ci", "TEXT", "''")
     _agregar_columna_si_no_existe(cursor, "estudiantes", "tutor_ci", "TEXT", "''")
 
@@ -57,6 +60,8 @@ def init_db():
         fecha TEXT NOT NULL,
         motivo TEXT NOT NULL,
         aprobado INTEGER DEFAULT 1,
+        activo INTEGER DEFAULT 1,
+        actualizado_en TEXT DEFAULT '',
         FOREIGN KEY (estudiante_id) REFERENCES estudiantes (id) ON DELETE CASCADE
     )
     """)
@@ -93,7 +98,8 @@ def init_db():
         telefono TEXT,
         email TEXT,
         activo INTEGER DEFAULT 1,
-        creado_en TEXT DEFAULT (datetime('now','localtime'))
+        creado_en TEXT DEFAULT (datetime('now','localtime')),
+        actualizado_en TEXT DEFAULT ''
     )
     """)
     _agregar_columna_si_no_existe(cursor, "docentes", "ci", "TEXT", "''")
@@ -105,11 +111,22 @@ def init_db():
         nombre TEXT NOT NULL UNIQUE,
         nivel TEXT DEFAULT 'Secundaria',
         descripcion TEXT,
-        activa INTEGER DEFAULT 1
+        activa INTEGER DEFAULT 1,
+        actualizado_en TEXT DEFAULT ''
     )
     """)
 
-    # Configuración por defecto (Bolivia +591)
+    # === MIGRACIONES: agregar columnas activo y actualizado_en a tablas existentes ===
+    _agregar_columna_si_no_existe(cursor, "cursos", "activo", "INTEGER", "1")
+    _agregar_columna_si_no_existe(cursor, "cursos", "actualizado_en", "TEXT", "''")
+    _agregar_columna_si_no_existe(cursor, "estudiantes", "activo", "INTEGER", "1")
+    _agregar_columna_si_no_existe(cursor, "estudiantes", "actualizado_en", "TEXT", "''")
+    _agregar_columna_si_no_existe(cursor, "permisos", "activo", "INTEGER", "1")
+    _agregar_columna_si_no_existe(cursor, "permisos", "actualizado_en", "TEXT", "''")
+    _agregar_columna_si_no_existe(cursor, "docentes", "actualizado_en", "TEXT", "''")
+    _agregar_columna_si_no_existe(cursor, "materias", "actualizado_en", "TEXT", "''")
+
+    # Configuración por defecto
     cursor.execute("INSERT OR IGNORE INTO configuracion (clave, valor) VALUES ('institucion', 'Colegio Nacional')")
     cursor.execute("INSERT OR IGNORE INTO configuracion (clave, valor) VALUES ('materia', 'Clase General')")
     cursor.execute("INSERT OR IGNORE INTO configuracion (clave, valor) VALUES ('docente', 'Profesor(a)')")
@@ -163,106 +180,179 @@ def init_db():
     conn.commit()
     conn.close()
 
+
 # --- CURSOS ---
-def obtener_cursos() -> List[sqlite3.Row]:
+def obtener_cursos(solo_activos: bool = True) -> List[sqlite3.Row]:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM cursos ORDER BY nombre")
+    where = "WHERE activo = 1" if solo_activos else "WHERE 1=1"
+    cursor.execute(f"SELECT * FROM cursos {where} ORDER BY nombre")
     cursos = cursor.fetchall()
     conn.close()
     return cursos
 
+
 def crear_curso(nombre: str, nivel: str = "", seccion: str = "") -> int:
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO cursos (nombre, nivel, seccion) VALUES (?, ?, ?)", (nombre, nivel, seccion))
+    cursor.execute(
+        "INSERT INTO cursos (nombre, nivel, seccion, activo) VALUES (?, ?, ?, 1)",
+        (nombre, nivel, seccion))
     conn.commit()
     cid = cursor.lastrowid
     conn.close()
     return cid
 
-def eliminar_curso(curso_id: int):
+
+def actualizar_curso(curso_id: int, nombre: str, nivel: str = "", seccion: str = ""):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM cursos WHERE id = ?", (curso_id,))
+    cursor.execute("""
+        UPDATE cursos SET nombre=?, nivel=?, seccion=?,
+               actualizado_en=datetime('now','localtime')
+        WHERE id=?
+    """, (nombre.strip(), nivel.strip(), seccion.strip(), curso_id))
     conn.commit()
     conn.close()
 
-# --- ESTUDIANTES ---
-def obtener_estudiantes_curso(curso_id: int) -> List[sqlite3.Row]:
+
+def eliminar_curso(curso_id: int):
+    """Eliminación LÓGICA: marca inactivo, no borra datos históricos."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM estudiantes WHERE curso_id = ? ORDER BY nombre_completo", (curso_id,))
+    cursor.execute("""
+        UPDATE cursos SET activo=0,
+               actualizado_en=datetime('now','localtime')
+        WHERE id=?
+    """, (curso_id,))
+    cursor.execute("""
+        UPDATE estudiantes SET activo=0,
+               actualizado_en=datetime('now','localtime')
+        WHERE curso_id=?
+    """, (curso_id,))
+    conn.commit()
+    conn.close()
+
+
+def reactivar_curso(curso_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE cursos SET activo=1 WHERE id=?", (curso_id,))
+    conn.commit()
+    conn.close()
+
+
+# --- ESTUDIANTES ---
+def obtener_estudiantes_curso(curso_id: int, solo_activos: bool = True) -> List[sqlite3.Row]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    where = "AND activo = 1" if solo_activos else ""
+    cursor.execute(
+        f"SELECT * FROM estudiantes WHERE curso_id = ? {where} ORDER BY nombre_completo",
+        (curso_id,))
     alumnos = cursor.fetchall()
     conn.close()
     return alumnos
 
-def buscar_estudiantes(curso_id: Optional[int] = None, texto: str = "") -> List[sqlite3.Row]:
-    """
-    Búsqueda por nombre o CI (estudiante) o nombre/CI del tutor.
-    Si curso_id es None, busca en todos los cursos.
-    """
+
+def buscar_estudiantes(curso_id: Optional[int] = None, texto: str = "",
+                       incluir_inactivos: bool = False) -> List[sqlite3.Row]:
     conn = get_connection()
     cursor = conn.cursor()
     like = f"%{texto.strip().lower()}%"
+    filtro_activo = "" if incluir_inactivos else "AND e.activo = 1"
     if curso_id is not None:
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT e.*, c.nombre AS curso_nombre
             FROM estudiantes e
             JOIN cursos c ON e.curso_id = c.id
-            WHERE e.curso_id = ?
-              AND (
-                LOWER(e.nombre_completo) LIKE ?
-                OR LOWER(COALESCE(e.ci,'')) LIKE ?
-                OR LOWER(e.tutor_nombre) LIKE ?
-                OR LOWER(COALESCE(e.tutor_ci,'')) LIKE ?
-              )
+            WHERE e.curso_id = ? {filtro_activo}
+              AND (LOWER(e.nombre_completo) LIKE ?
+                   OR LOWER(COALESCE(e.ci,'')) LIKE ?
+                   OR LOWER(e.tutor_nombre) LIKE ?
+                   OR LOWER(COALESCE(e.tutor_ci,'')) LIKE ?)
             ORDER BY e.nombre_completo
         """, (curso_id, like, like, like, like))
     else:
-        cursor.execute("""
+        cursor.execute(f"""
             SELECT e.*, c.nombre AS curso_nombre
             FROM estudiantes e
             JOIN cursos c ON e.curso_id = c.id
-            WHERE LOWER(e.nombre_completo) LIKE ?
-               OR LOWER(COALESCE(e.ci,'')) LIKE ?
-               OR LOWER(e.tutor_nombre) LIKE ?
-               OR LOWER(COALESCE(e.tutor_ci,'')) LIKE ?
+            WHERE 1=1 {filtro_activo}
+              AND (LOWER(e.nombre_completo) LIKE ?
+                   OR LOWER(COALESCE(e.ci,'')) LIKE ?
+                   OR LOWER(e.tutor_nombre) LIKE ?
+                   OR LOWER(COALESCE(e.tutor_ci,'')) LIKE ?)
             ORDER BY e.nombre_completo
         """, (like, like, like, like))
     filas = cursor.fetchall()
     conn.close()
     return filas
 
-def crear_estudiante(curso_id: int, nombre: str, ci: str, tutor: str, tutor_ci: str, telefono: str):
+
+def crear_estudiante(curso_id: int, nombre: str, ci: str, tutor: str,
+                     tutor_ci: str, telefono: str):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO estudiantes (curso_id, nombre_completo, ci, tutor_nombre, tutor_ci, tutor_telefono)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (curso_id, nombre.strip(), ci.strip(), tutor.strip(), tutor_ci.strip(), telefono.strip()))
+        INSERT INTO estudiantes
+        (curso_id, nombre_completo, ci, tutor_nombre, tutor_ci, tutor_telefono, activo)
+        VALUES (?, ?, ?, ?, ?, ?, 1)
+    """, (curso_id, nombre.strip(), ci.strip(), tutor.strip(),
+          tutor_ci.strip(), telefono.strip()))
     conn.commit()
     conn.close()
 
-def eliminar_estudiante(estudiante_id: int):
+
+def actualizar_estudiante(estudiante_id: int, curso_id: int, nombre: str, ci: str,
+                          tutor: str, tutor_ci: str, telefono: str):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM estudiantes WHERE id = ?", (estudiante_id,))
+    cursor.execute("""
+        UPDATE estudiantes
+        SET curso_id=?, nombre_completo=?, ci=?, tutor_nombre=?, tutor_ci=?,
+            tutor_telefono=?, actualizado_en=datetime('now','localtime')
+        WHERE id=?
+    """, (curso_id, nombre.strip(), ci.strip(), tutor.strip(),
+          tutor_ci.strip(), telefono.strip(), estudiante_id))
     conn.commit()
     conn.close()
+
+
+def eliminar_estudiante(estudiante_id: int):
+    """Eliminación LÓGICA."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE estudiantes SET activo=0,
+               actualizado_en=datetime('now','localtime')
+        WHERE id=?
+    """, (estudiante_id,))
+    conn.commit()
+    conn.close()
+
+
+def reactivar_estudiante(estudiante_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE estudiantes SET activo=1 WHERE id=?", (estudiante_id,))
+    conn.commit()
+    conn.close()
+
 
 # --- DOCENTES ---
 def crear_docente(nombre: str, ci: str, materia: str, telefono: str = "", email: str = "") -> int:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO docentes (nombre_completo, ci, materia, telefono, email) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO docentes (nombre_completo, ci, materia, telefono, email, activo) VALUES (?, ?, ?, ?, ?, 1)",
         (nombre.strip(), ci.strip(), materia.strip(), telefono.strip(), email.strip())
     )
     conn.commit()
     did = cursor.lastrowid
     conn.close()
     return did
+
 
 def obtener_docentes(solo_activos: bool = True, texto: str = "") -> List[sqlite3.Row]:
     conn = get_connection()
@@ -278,6 +368,7 @@ def obtener_docentes(solo_activos: bool = True, texto: str = "") -> List[sqlite3
     conn.close()
     return docentes
 
+
 def obtener_docente(docente_id: int) -> Optional[sqlite3.Row]:
     conn = get_connection()
     cursor = conn.cursor()
@@ -286,35 +377,54 @@ def obtener_docente(docente_id: int) -> Optional[sqlite3.Row]:
     conn.close()
     return doc
 
-def eliminar_docente(docente_id: int):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("UPDATE docentes SET activo = 0 WHERE id = ?", (docente_id,))
-    conn.commit()
-    conn.close()
 
-def actualizar_docente(docente_id: int, nombre: str, ci: str, materia: str, telefono: str = "", email: str = ""):
+def eliminar_docente(docente_id: int):
+    """Eliminación LÓGICA."""
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        UPDATE docentes SET nombre_completo = ?, ci = ?, materia = ?, telefono = ?, email = ?
+        UPDATE docentes SET activo=0,
+               actualizado_en=datetime('now','localtime')
+        WHERE id=?
+    """, (docente_id,))
+    conn.commit()
+    conn.close()
+
+
+def reactivar_docente(docente_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE docentes SET activo=1 WHERE id=?", (docente_id,))
+    conn.commit()
+    conn.close()
+
+
+def actualizar_docente(docente_id: int, nombre: str, ci: str, materia: str,
+                       telefono: str = "", email: str = ""):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE docentes SET nombre_completo = ?, ci = ?, materia = ?, telefono = ?, email = ?,
+               actualizado_en=datetime('now','localtime')
         WHERE id = ?
     """, (nombre.strip(), ci.strip(), materia.strip(), telefono.strip(), email.strip(), docente_id))
     conn.commit()
     conn.close()
+
 
 # --- MATERIAS ---
 def crear_materia(nombre: str, nivel: str = "Secundaria", descripcion: str = "") -> int:
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO materias (nombre, nivel, descripcion) VALUES (?, ?, ?)",
+        "INSERT INTO materias (nombre, nivel, descripcion, activa) VALUES (?, ?, ?, 1)",
         (nombre.strip(), nivel.strip(), descripcion.strip())
     )
     conn.commit()
     mid = cursor.lastrowid
     conn.close()
     return mid
+
 
 def obtener_materias(solo_activas: bool = True, texto: str = "") -> List[sqlite3.Row]:
     conn = get_connection()
@@ -330,25 +440,56 @@ def obtener_materias(solo_activas: bool = True, texto: str = "") -> List[sqlite3
     conn.close()
     return materias
 
-def eliminar_materia(materia_id: int):
+
+def actualizar_materia(materia_id: int, nombre: str, nivel: str = "Secundaria", descripcion: str = ""):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("UPDATE materias SET activa = 0 WHERE id = ?", (materia_id,))
+    cursor.execute("""
+        UPDATE materias SET nombre=?, nivel=?, descripcion=?,
+               actualizado_en=datetime('now','localtime')
+        WHERE id=?
+    """, (nombre.strip(), nivel.strip(), descripcion.strip(), materia_id))
     conn.commit()
     conn.close()
+
+
+def eliminar_materia(materia_id: int):
+    """Eliminación LÓGICA."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE materias SET activa=0,
+               actualizado_en=datetime('now','localtime')
+        WHERE id=?
+    """, (materia_id,))
+    conn.commit()
+    conn.close()
+
+
+def reactivar_materia(materia_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE materias SET activa=1 WHERE id=?", (materia_id,))
+    conn.commit()
+    conn.close()
+
 
 # --- ASISTENCIA ---
 def cargar_o_iniciar_asistencia_dia(curso_id: int, fecha: str) -> List[Dict]:
     conn = get_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM estudiantes WHERE curso_id = ? ORDER BY nombre_completo", (curso_id,))
+    cursor.execute(
+        "SELECT * FROM estudiantes WHERE curso_id = ? AND activo = 1 ORDER BY nombre_completo",
+        (curso_id,))
     estudiantes = cursor.fetchall()
     if not estudiantes:
         conn.close()
         return []
 
-    cursor.execute("SELECT estudiante_id, motivo FROM permisos WHERE fecha = ? AND aprobado = 1", (fecha,))
+    cursor.execute(
+        "SELECT estudiante_id, motivo FROM permisos WHERE fecha = ? AND aprobado = 1 AND activo = 1",
+        (fecha,))
     permisos = {row["estudiante_id"]: row["motivo"] for row in cursor.fetchall()}
 
     for est in estudiantes:
@@ -374,13 +515,14 @@ def cargar_o_iniciar_asistencia_dia(curso_id: int, fecha: str) -> List[Dict]:
             a.fecha, a.estado, a.observacion, a.notificado_whatsapp
         FROM estudiantes e
         JOIN asistencias a ON e.id = a.estudiante_id
-        WHERE e.curso_id = ? AND a.fecha = ?
+        WHERE e.curso_id = ? AND a.fecha = ? AND e.activo = 1
         ORDER BY e.nombre_completo
     """, (curso_id, fecha))
 
     filas = [dict(row) for row in cursor.fetchall()]
     conn.close()
     return filas
+
 
 def actualizar_estado_asistencia(asistencia_id: int, nuevo_estado: str, observacion: str = ""):
     conn = get_connection()
@@ -390,6 +532,7 @@ def actualizar_estado_asistencia(asistencia_id: int, nuevo_estado: str, observac
     conn.commit()
     conn.close()
 
+
 def marcar_whatsapp_notificado(asistencia_id: int):
     conn = get_connection()
     cursor = conn.cursor()
@@ -397,12 +540,14 @@ def marcar_whatsapp_notificado(asistencia_id: int):
     conn.commit()
     conn.close()
 
+
 # --- PERMISOS ---
 def registrar_permiso(estudiante_id: int, fecha: str, motivo: str):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO permisos (estudiante_id, fecha, motivo, aprobado) VALUES (?, ?, ?, 1)",
-                   (estudiante_id, fecha, motivo))
+    cursor.execute(
+        "INSERT INTO permisos (estudiante_id, fecha, motivo, aprobado, activo) VALUES (?, ?, ?, 1, 1)",
+        (estudiante_id, fecha, motivo))
     cursor.execute("""
         UPDATE asistencias SET estado = 'PERMISO', observacion = ?
         WHERE estudiante_id = ? AND fecha = ?
@@ -410,18 +555,55 @@ def registrar_permiso(estudiante_id: int, fecha: str, motivo: str):
     conn.commit()
     conn.close()
 
-def obtener_permisos(texto: str = "") -> List[sqlite3.Row]:
+
+def actualizar_permiso(permiso_id: int, fecha: str, motivo: str):
     conn = get_connection()
     cursor = conn.cursor()
-    where = ""
+    cursor.execute("""
+        UPDATE permisos SET fecha=?, motivo=?,
+               actualizado_en=datetime('now','localtime')
+        WHERE id=?
+    """, (fecha, motivo.strip(), permiso_id))
+    conn.commit()
+    conn.close()
+
+
+def eliminar_permiso(permiso_id: int):
+    """Eliminación LÓGICA."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE permisos SET activo=0,
+               actualizado_en=datetime('now','localtime')
+        WHERE id=?
+    """, (permiso_id,))
+    conn.commit()
+    conn.close()
+
+
+def reactivar_permiso(permiso_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE permisos SET activo=1 WHERE id=?", (permiso_id,))
+    conn.commit()
+    conn.close()
+
+
+def obtener_permisos(texto: str = "", incluir_inactivos: bool = False) -> List[sqlite3.Row]:
+    conn = get_connection()
+    cursor = conn.cursor()
+    condiciones = []
     params: List = []
+    if not incluir_inactivos:
+        condiciones.append("p.activo = 1")
     if texto.strip():
         like = f"%{texto.strip().lower()}%"
-        where = """WHERE (
+        condiciones.append("""(
             LOWER(e.nombre_completo) LIKE ? OR LOWER(COALESCE(e.ci,'')) LIKE ?
             OR LOWER(e.tutor_nombre) LIKE ? OR LOWER(COALESCE(e.tutor_ci,'')) LIKE ?
-        )"""
-        params = [like, like, like, like]
+        )""")
+        params.extend([like, like, like, like])
+    where = ("WHERE " + " AND ".join(condiciones)) if condiciones else ""
     cursor.execute(f"""
         SELECT p.*, e.nombre_completo, COALESCE(e.ci,'') as ci,
                e.tutor_nombre, COALESCE(e.tutor_ci,'') as tutor_ci,
@@ -436,6 +618,7 @@ def obtener_permisos(texto: str = "") -> List[sqlite3.Row]:
     conn.close()
     return permisos
 
+
 # --- CONFIGURACIÓN ---
 def obtener_configuracion() -> Dict[str, str]:
     conn = get_connection()
@@ -445,6 +628,7 @@ def obtener_configuracion() -> Dict[str, str]:
     conn.close()
     return config
 
+
 def guardar_configuracion(clave: str, valor: str):
     conn = get_connection()
     cursor = conn.cursor()
@@ -452,13 +636,97 @@ def guardar_configuracion(clave: str, valor: str):
     conn.commit()
     conn.close()
 
+
 # --- SETUP ---
 def setup_completado() -> bool:
     cfg = obtener_configuracion()
     return cfg.get("setup_completado", "0") == "1"
+
 
 def marcar_setup_completado(docente_id: int, docente_nombre: str, materia: str):
     guardar_configuracion("setup_completado", "1")
     guardar_configuracion("docente_actual_id", str(docente_id))
     guardar_configuracion("docente", docente_nombre)
     guardar_configuracion("materia", materia)
+
+
+# ============================================================
+# ASIGNACIÓN DOCENTE ↔ CURSO (relación N:M)
+# ============================================================
+
+def _crear_tabla_docente_curso(cursor):
+    """Crea la tabla de relación docente-curso si no existe."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS docente_curso (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            docente_id INTEGER NOT NULL,
+            curso_id INTEGER NOT NULL,
+            activo INTEGER DEFAULT 1,
+            actualizado_en TEXT DEFAULT '',
+            FOREIGN KEY(docente_id) REFERENCES docentes(id),
+            FOREIGN KEY(curso_id) REFERENCES cursos(id),
+            UNIQUE(docente_id, curso_id)
+        )
+    """)
+
+
+def asignar_curso_a_docente(docente_id: int, curso_id: int):
+    """Asigna (o reactiva) un curso a un docente."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "INSERT INTO docente_curso (docente_id, curso_id, activo) VALUES (?, ?, 1)",
+            (docente_id, curso_id)
+        )
+    except sqlite3.IntegrityError:
+        # Ya existe la fila → reactivarla (borrado lógico reversible)
+        cursor.execute(
+            "UPDATE docente_curso SET activo=1, actualizado_en=datetime('now','localtime') "
+            "WHERE docente_id=? AND curso_id=?",
+            (docente_id, curso_id)
+        )
+    conn.commit()
+    conn.close()
+
+
+def desasignar_curso_de_docente(docente_id: int, curso_id: int):
+    """Borrado lógico: desactiva la asignación docente-curso."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE docente_curso SET activo=0, actualizado_en=datetime('now','localtime') "
+        "WHERE docente_id=? AND curso_id=?",
+        (docente_id, curso_id)
+    )
+    conn.commit()
+    conn.close()
+
+
+def obtener_cursos_de_docente(docente_id: int, incluir_inactivos: bool = False) -> List[sqlite3.Row]:
+    """Lista los cursos asignados a un docente (solo activos por defecto)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    filtro = "" if incluir_inactivos else "AND dc.activo = 1"
+    cursor.execute(f"""
+        SELECT c.id, c.nombre, c.seccion, dc.activo
+        FROM docente_curso dc
+        JOIN cursos c ON c.id = dc.curso_id
+        WHERE dc.docente_id = ? {filtro}
+        ORDER BY c.nombre
+    """, (docente_id,))
+    filas = cursor.fetchall()
+    conn.close()
+    return filas
+
+
+def obtener_docentes_con_cursos(solo_activos: bool = True, texto: str = "") -> List[Dict]:
+    """Devuelve docentes enriquecidos con la lista de cursos asignados."""
+    docentes = obtener_docentes(solo_activos, texto)
+    resultado = []
+    for d in docentes:
+        d_dict = dict(d)
+        cursos = obtener_cursos_de_docente(d["id"])
+        d_dict["cursos_asignados"] = [dict(c) for c in cursos]
+        resultado.append(d_dict)
+    return resultado

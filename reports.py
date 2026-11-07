@@ -17,7 +17,7 @@ def obtener_resumen_dia(curso_id: int, fecha: str) -> Dict[str, Any]:
             SUM(CASE WHEN a.estado = 'ATRASO' THEN 1 ELSE 0 END) as atrasos
         FROM asistencias a
         JOIN estudiantes e ON a.estudiante_id = e.id
-        WHERE e.curso_id = ? AND a.fecha = ?
+        WHERE e.curso_id = ? AND a.fecha = ? AND e.activo = 1
     """, (curso_id, fecha))
     row = cursor.fetchone()
     conn.close()
@@ -36,11 +36,14 @@ def obtener_resumen_dia(curso_id: int, fecha: str) -> Dict[str, Any]:
     }
 
 
-def obtener_resumen_mensual(curso_id: int, anio_mes: str, texto: str = "") -> List[Dict[str, Any]]:
+def obtener_resumen_mensual(curso_id: int, anio_mes: str, texto: str = "",
+                            incluir_inactivos: bool = False) -> List[Dict[str, Any]]:
     conn = get_connection()
     cursor = conn.cursor()
     where = "WHERE e.curso_id = ?"
     params: List = [f"{anio_mes}%", curso_id]
+    if not incluir_inactivos:
+        where += " AND e.activo = 1"
     if texto.strip():
         like = f"%{texto.strip().lower()}%"
         where += " AND (LOWER(e.nombre_completo) LIKE ? OR LOWER(COALESCE(e.ci,'')) LIKE ? OR LOWER(e.tutor_nombre) LIKE ? OR LOWER(COALESCE(e.tutor_ci,'')) LIKE ?)"
@@ -124,7 +127,6 @@ def exportar_reporte_csv(
     with open(ruta_destino, mode="w", newline="", encoding="utf-8-sig") as f:
         writer = csv.writer(f, delimiter=",", quoting=csv.QUOTE_MINIMAL)
 
-        # ===== ENCABEZADO INSTITUCIONAL =====
         writer.writerow(["═" * 110])
         writer.writerow([f"REPORTE DE ASISTENCIA ESCOLAR - NIVEL {nivel.upper()}"])
         writer.writerow(["═" * 110])
@@ -157,22 +159,11 @@ def exportar_reporte_csv(
         writer.writerow(["═" * 110])
         writer.writerow([])
 
-        # ===== CABECERA DE TABLA (con CI estudiante y CI tutor) =====
         writer.writerow([
-            "N°",
-            "CI Estudiante",
-            "Estudiante",
-            "Tutor / Apoderado",
-            "CI Tutor",
-            "Teléfono (Bolivia)",
-            "Días Reg.",
-            "Presentes",
-            "Ausentes",
-            "Permisos",
-            "Atrasos",
-            "% Asistencia",
-            "Estado",
-            "Observación"
+            "N°", "CI Estudiante", "Estudiante", "Tutor / Apoderado",
+            "CI Tutor", "Teléfono (Bolivia)", "Días Reg.", "Presentes",
+            "Ausentes", "Permisos", "Atrasos", "% Asistencia",
+            "Estado", "Observación"
         ])
 
         for idx, d in enumerate(datos, start=1):
@@ -184,12 +175,8 @@ def exportar_reporte_csv(
                 obs = ""
 
             writer.writerow([
-                idx,
-                d.get("ci", ""),
-                d["nombre"],
-                d["tutor"],
-                d.get("tutor_ci", ""),
-                d["telefono"],
+                idx, d.get("ci", ""), d["nombre"], d["tutor"],
+                d.get("tutor_ci", ""), d["telefono"],
                 d["dias"], d["presentes"], d["ausentes"],
                 d["permisos"], d["atrasos"],
                 f"{d['porcentaje']}%", estado, obs
