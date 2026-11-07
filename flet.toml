@@ -1,0 +1,12 @@
+[app]
+name = "AsistenciaDocente"
+org = "com.docente.asistencia"
+version = "1.0.0"
+description = "Control de Asistencia Escolar y Notificaciones WhatsApp para Android 14"
+
+[android]
+min_sdk_version = 34
+target_sdk_version = 34
+permissions = [
+    "INTERNET"
+]
